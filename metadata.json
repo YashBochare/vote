@@ -1,0 +1,5 @@
+{
+  "name": "CivicVoice",
+  "description": "A real-time platform for citizens to report and vote on community issues.",
+  "requestFramePermissions": ["geolocation"]
+}

@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the platform.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user." },
+        "displayName": { "type": "string", "description": "The user's display name." },
+        "photoURL": { "type": "string", "description": "The user's profile photo URL." },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "The user's role." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user was created." }
+      },
+      "required": ["uid", "displayName", "role"]
+    },
+    "Issue": {
+      "title": "Issue",
+      "description": "A community issue reported by a citizen.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the issue." },
+        "title": { "type": "string", "description": "The title of the issue." },
+        "description": { "type": "string", "description": "A detailed description of the issue." },
+        "category": { "type": "string", "enum": ["Infrastructure", "Environment", "Safety", "Health", "Other"], "description": "The category of the issue." },
+        "status": { "type": "string", "enum": ["open", "in-progress", "resolved"], "description": "The current status of the issue." },
+        "authorId": { "type": "string", "description": "The UID of the user who reported the issue." },
+        "authorName": { "type": "string", "description": "The name of the user who reported the issue." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the issue was reported." },
+        "voteCount": { "type": "number", "description": "The number of votes the issue has received." }
+      },
+      "required": ["title", "description", "category", "status", "authorId", "createdAt", "voteCount"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "A vote cast by a user on an issue.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who voted." },
+        "issueId": { "type": "string", "description": "The ID of the issue being voted on." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the vote was cast." }
+      },
+      "required": ["userId", "issueId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "The collection of user profiles."
+    },
+    "/issues/{issueId}": {
+      "schema": "Issue",
+      "description": "The collection of reported issues."
+    },
+    "/votes/{voteId}": {
+      "schema": "Vote",
+      "description": "The collection of votes cast on issues."
+    }
+  }
+}

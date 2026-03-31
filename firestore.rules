@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - photoURL: string (optional)
+    //   - role: string (required, enum: ['user', 'admin'])
+    //   - createdAt: string (optional, ISO 8601)
+    //
+    // Collection: issues
+    // Document ID: {issueId}
+    // Fields:
+    //   - id: string (optional)
+    //   - title: string (required, min: 5, max: 100)
+    //   - description: string (required, min: 10, max: 2000)
+    //   - category: string (required, enum: ['Infrastructure', 'Environment', 'Safety', 'Health', 'Other'])
+    //   - status: string (required, enum: ['open', 'in-progress', 'resolved'])
+    //   - authorId: string (required, immutable)
+    //   - authorName: string (optional)
+    //   - createdAt: string (required, ISO 8601, immutable)
+    //   - voteCount: number (required, min: 0)
+    //
+    // Collection: votes
+    // Document ID: {userId}_{issueId}
+    // Fields:
+    //   - userId: string (required, immutable)
+    //   - issueId: string (required, immutable)
+    //   - createdAt: string (required, ISO 8601, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.authorId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "yashbochare21@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'photoURL', 'role', 'createdAt']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             (data.photoURL == null || data.photoURL is string) &&
+             data.role in ['user', 'admin'];
+    }
+
+    function isValidIssue(data) {
+      return hasOnlyAllowedFields(['id', 'title', 'description', 'category', 'status', 'authorId', 'authorName', 'createdAt', 'voteCount']) &&
+             data.title is string && data.title.size() >= 5 && data.title.size() <= 100 &&
+             data.description is string && data.description.size() >= 10 && data.description.size() <= 2000 &&
+             data.category in ['Infrastructure', 'Environment', 'Safety', 'Health', 'Other'] &&
+             data.status in ['open', 'in-progress', 'resolved'] &&
+             data.authorId is string && data.authorId == request.auth.uid &&
+             isValidDateString(data.createdAt) &&
+             data.voteCount is number && data.voteCount >= 0;
+    }
+
+    function isValidVote(data) {
+      return hasOnlyAllowedFields(['userId', 'issueId', 'createdAt']) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.issueId is string &&
+             isValidDateString(data.createdAt);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) &&
+                      request.resource.data.role == resource.data.role;
+    }
+
+    match /issues/{issueId} {
+      allow read: if true; // Publicly viewable
+      allow create: if isAuthenticated() && isValidIssue(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Owner can update title/description/category if status is open
+        (isDocOwner() && resource.data.status == 'open' && isValidIssue(request.resource.data) && 
+         request.resource.data.status == resource.data.status && 
+         request.resource.data.voteCount == resource.data.voteCount) ||
+        // Admin can update status
+        (isAdmin() && isValidIssue(request.resource.data) && 
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.createdAt == resource.data.createdAt) ||
+        // Anyone can update voteCount via atomic increment (handled by votes collection logic)
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['voteCount']) &&
+         math.abs(request.resource.data.voteCount - resource.data.voteCount) == 1 &&
+         (
+           (request.resource.data.voteCount > resource.data.voteCount &&
+            !exists(/databases/$(database)/documents/votes/$(request.auth.uid + '_' + issueId)) &&
+            getAfter(/databases/$(database)/documents/votes/$(request.auth.uid + '_' + issueId)) != null) ||
+           (request.resource.data.voteCount < resource.data.voteCount &&
+            exists(/databases/$(database)/documents/votes/$(request.auth.uid + '_' + issueId)) &&
+            getAfter(/databases/$(database)/documents/votes/$(request.auth.uid + '_' + issueId)) == null)
+         ))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /votes/{voteId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVote(request.resource.data) && 
+                      voteId == request.auth.uid + '_' + request.resource.data.issueId;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
